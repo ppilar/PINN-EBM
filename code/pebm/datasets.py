@@ -5,21 +5,24 @@ import numpy as np
 import scipy as sp
 
 from .utils_navier_stokes import get_aux
-#from noise import get_loss_d
 
-def get_ds(x_opt):
+def get_ds(x_opt, dpar=''):
+    if type(dpar) != str and type(dpar) != list:
+        dpar =  [dpar]
+    
+    #TODO: fix ds inputs
     if x_opt == 1:
-        ds = ds_exp_1d(x_opt)
+        ds = ds_exp_1d(x_opt, dpar)
     if x_opt == 2:
-        ds = ds_sin_1d(x_opt)
+        ds = ds_sin_1d(x_opt, dpar)
     if x_opt == 3:
-        ds = ds_bessel_1d(x_opt)
+        ds = ds_bessel_1d(x_opt, dpar)
     if x_opt == 4:
-        ds = ds_sin_2d(x_opt)
+        ds = ds_sin_2d(x_opt, dpar)
     if x_opt == 5:
-        ds = ds_sin_exp_2d(x_opt)
+        ds = ds_sin_exp_2d(x_opt, dpar)
     if x_opt == 6:
-        ds = ds_exp_2d(x_opt)    
+        ds = ds_exp_2d(x_opt, dpar)    
     if x_opt == 101:
         ds = ds_navier_stokes(x_opt)
         
@@ -28,17 +31,17 @@ def get_ds(x_opt):
 
 
 class pebm_dataset():
-    def __init__(self, x_opt):
+    def __init__(self, x_opt, dpar):
         self.x_opt = x_opt
+        self.dpar = dpar
         
     def init_data_ranges(self):  #ranges of input data and normalizing const.
         print('not implemented!')
     
     def init_network_pars(self):  #network parameteres
-        Uvec_pinn = [40]*4 #[40]*5
+        Uvec_pinn = [40]*4
         fdrop_pinn = 0.
 
-        #Uvec_ebm = [20]*3
         Uvec_ebm = [5]*3
         fdrop_ebm = 0.5
         
@@ -73,9 +76,11 @@ class pebm_dataset():
  
         
 class ds_exp_1d(pebm_dataset):
-    def __init__(self, pars):
-        pebm_dataset.__init__(self, pars)
-        self.dpar = [0.3]
+    def __init__(self, pars, dpar):
+        if type(dpar) == str:
+            dpar = [0.3]
+        pebm_dataset.__init__(self, pars, dpar)
+        #self.dpar = [0.3]
         
     def init_data_ranges(self):
         tmin, tmax = (0,), (10,)        
@@ -129,8 +134,8 @@ class ds_sin_1d(pebm_dataset):
 
     
 class ds_bessel_1d(pebm_dataset):
-    def __init__(self, pars):
-        pebm_dataset.__init__(self, pars)
+    def __init__(self, x_opt, dpar):
+        pebm_dataset.__init__(self, x_opt, dpar) #TODO: fix inputs
         self.dpar = [0.7]
         
     def init_data_ranges(self):
@@ -192,10 +197,8 @@ class ds_sin_2d(pebm_dataset):
             xdot0_2 = torch.autograd.grad(xdot0.sum(), t, create_graph=True)[0][:,0]
             xdot1_2 = torch.autograd.grad(xdot1.sum(), t, create_graph=True)[0][:,1]
             lf0 = (xdot0_2 - (-dpar[0]**2)*x)**2
-            lf1 = (xdot1_2 - (-dpar[1]**2)*x)**2
-            #lf2 = xdot0 - xdot1
-            lf = lf0 + lf1
-            #lf = lf0.mean() + lf1.mean()
+            lf1 = (xdot1_2 - (-dpar[1]**2)*x)**2            
+            lf = lf0 + lf1            
             
             return lf
         return loss_f
@@ -262,7 +265,6 @@ class ds_exp_2d(pebm_dataset):
             xdot1 = xdot[:,1]
             lf0 = (xdot0 - dpar[0]*x)**2
             lf1 = (xdot1 - dpar[1]*x)**2
-            #lf2 = xdot0 - xdot1
             lf = lf0 + lf1
             
             return lf
@@ -277,7 +279,7 @@ class ds_exp_2d(pebm_dataset):
     
 class ds_navier_stokes(pebm_dataset):
     def __init__(self, pars):
-        pebm_dataset.__init__(self, pars)
+        pebm_dataset.__init__(self, pars,-1)
         self.dpar = [1, 0.01]
         
 
@@ -285,14 +287,13 @@ class ds_navier_stokes(pebm_dataset):
         Uvec_pinn = [20]*8
         fdrop_pinn = 0.
 
-        #Uvec_ebm = [20]*3
         Uvec_ebm = [5]*3
         fdrop_ebm = 0.5
         
         return Uvec_pinn, Uvec_ebm, fdrop_pinn, fdrop_ebm
     
     def init_data_ranges(self):
-        tmin, tmax = (0, 0, 0), (1, 1, 1)  #adjust!
+        tmin, tmax = (0, 0, 0), (1, 1, 1)
         tmin_coll, tmax_coll = (0, 0, 0), (1, 1, 1)      
         nfac = 0.05
         N_train = 5000
@@ -306,7 +307,6 @@ class ds_navier_stokes(pebm_dataset):
     
     def get_meas_eq(self, yopt=-1):
         def meas_eq(x, mpar=-1):
-            #print(self.u[0])
             N = x.shape[0]
             return torch.stack((self.u[-N:],self.v[-N:])).T
         return meas_eq

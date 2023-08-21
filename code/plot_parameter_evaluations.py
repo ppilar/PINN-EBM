@@ -1,0 +1,70 @@
+# -*- coding: utf-8 -*-
+
+import pickle
+import torch
+import numpy as np
+import matplotlib.pyplot as plt
+
+from pebm.plots import *
+from pebm.results import *
+from pebm.utils_train import calculate_stats, print_table
+
+
+       
+
+plt.rcParams.update({'font.size': 14})
+
+
+#%%
+#evaluate impact of weighting of pde loss
+input_path0 = '../results/lf2_x1_v3/x1_n3G_'
+fname0 = 'x1n3Gr'
+lf_fac2_vec = [0.5,1,2,5,10,20,50]
+res = plot_par_eval(input_path0, fname0, 5, lf_fac2_vec, 'lf2', jmodel_vec = [3,2,0])
+
+
+#evaluate impact of number of training points
+N_train_vec = [20, 50, 100, 200]
+res = plot_par_eval('../results/x1_Ntr_v1/x1_n3G_', 'x1n3Gr', 5, N_train_vec, 'Ntr', jmodel_vec = [3,2,0])
+plt.savefig('../results/plots/x1_abl_Ntr.pdf')
+
+
+
+#%% plot omega comparison for the different experiments
+input_path0_vec = ['../results/lf2_x1_v3/x1_n3G_','../results/lf2_x3_v2/x3_n3G_', '../results/lf2_x101_v3/x101_n3G_']
+fname0_vec = ['x1n3Gr','x3n3Gr','x101n3Gr']
+
+
+mname_vec = ['exponential', 'Bessel', 'Navier Stokes']
+par_label = 'lf2'
+par_label2 = '$\omega$'
+
+
+fig, axs = plt.subplots(4,3,figsize=(14,17))
+fig.tight_layout(h_pad=3)
+for j, input_path0 in enumerate(input_path0_vec):
+    fname0 = fname0_vec[j]
+    if j == 0:
+        par_vec = [0.5,1,2,5,10,20,50]
+    if j == 1:
+        par_vec = [0.5,1,2,5,10,20,50]
+    if j == 2:
+        par_vec = [1, 10, 50, 100]
+    (dpar_ges, rmse_ges, dpde_ges, logL_ges), res = gather_run_data(input_path0, fname0, 5, par_vec, par_label)        
+    stat_vec = [logL_ges[:,:,1,:], rmse_ges[:,:,1,:], dpde_ges[:,:,0,:], dpar_ges[:,:,0,:]]
+    sname_vec = ['logL validation','RMSE validation','$f^2$', '$|\Delta \lambda|$']
+    sname_vec[0] = mname_vec[j] + '\n\n' + sname_vec[0]
+    for k in range(4):
+        if j==2:
+            sname_vec[3] = '$|\Delta \lambda_1|$'
+        
+        jmodel_vec = [3,2,0]
+        axplot_stat(axs[k,j], stat_vec[k], par_vec, sname_vec[k], par_label2, jmodel_vec = jmodel_vec)
+   
+plt.savefig('../results/plots/omega_ablation.pdf')
+
+
+
+
+
+

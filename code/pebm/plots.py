@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import torch
 import numpy as np
 
+from .utils import *
 
 
 def plot_data(dim, t_train, y_train, t_test, y_test, f_train):
@@ -121,6 +122,9 @@ def plot_ebm(net_ebm, res, opar, noise, ymin, ymax, path, device, bins=21):
         
     plt.show()
     
+    indicator = (y_net/y_net[indn]*f)[-1] #check if training converged
+    return indicator
+    
 
 def plot_ebm_comp(y_plot, curves_ebm, curve_true, path):
     #plot ebm predictions of multiple runs together
@@ -185,19 +189,22 @@ def plot_pinn_1d(net_pinn, fx, t_train, y_train, t_test, y_test, tmin, tmax, pat
         netp.to('cpu')
         
     t_plot = t_plot.to('cpu')
-    if N > 1:
-        cvec = ['r','b','g','c']
-    else:
-        cvec = ['b']
+    #if N > 1:
+    #    cvec = ['r','b','g','c']
+    #else:
+    #    cvec = ['b']
         
     plt.figure()
     for xnp, j in zip(xnp_ges, range(N)):
-        plt.plot(t_plot, xnp, color=cvec[j])
+        c = get_color(j)
+        plt.plot(t_plot, xnp, color=c)
         
-    if N == 4:
-        lvec = ['pinn0', 'pinn-ebm', 'pinn-off', 'pinn0-ebm', 'true']
-    else:
-        lvec = ['pinn-ebm', 'true']
+    # if N == 4:
+    #     lvec = ['pinn0', 'pinn-ebm', 'pinn-off', 'pinn0-ebm', 'true']
+    # else:
+    #     lvec = ['pinn-ebm', 'true']
+        
+    lvec = get_lvec()
         
         
     plt.plot(t_plot, x_plot,color='k')
@@ -305,7 +312,7 @@ def plot_dpar_statistics(dpargesges, dpar_true, Jgesges, lossdgesges, lossfgesge
     #plot statistics of learned pde parameters and losses
     
     Npar = dpargesges[0].shape[0]
-    Nmodel = 3
+    Nmodel = 4
     
     std_list = []
     mu_list = []
@@ -404,6 +411,7 @@ def plot_logL(jm, logLG_ges, logLebm_ges, rmse_ges, path, itest=100):
                     
 def plot_error_statistics(logLG_gesges, logLebm_gesges, rmse_gesges, path, itest = 100):
     #plot statistics of logL and RMSE
+    Nmodel = 4
     
     N = logLG_gesges.shape[3]
     Nrun = logLG_gesges.shape[2]
@@ -417,12 +425,12 @@ def plot_error_statistics(logLG_gesges, logLebm_gesges, rmse_gesges, path, itest
     rmse_mu = rmse_gesges.mean(2)
     rmse_std = rmse_gesges.std(2)
     
-    cvec = ['r','b','g','c']
-    lvec = ['pinn0', 'pinn-ebm', 'pinn-off', 'pinn0-ebm']
+    #cvec = ['r','b','g','c']
+    #lvec = ['pinn0', 'pinn-ebm', 'pinn-off', 'pinn0-ebm']
     fig, ax = plt.subplots(2, 2, figsize=(10,7))
     for i in range(2):
         for j in range(2):
-            for jm in range(3):
+            for jm in range(Nmodel):
                 if i == 0:
                     if jm in [1,3]:
                         mu = logLebm_mu[jm,j,:]
@@ -433,9 +441,12 @@ def plot_error_statistics(logLG_gesges, logLebm_gesges, rmse_gesges, path, itest
                 elif i == 1:
                     mu = rmse_mu[jm,j,:]
                     std = rmse_std[jm,j,:]
-                    
-                ax[i,j].plot(np.array(range(0,mu.shape[0]))*itest,mu, label=lvec[jm], linewidth=2, color=cvec[jm])
-                ax[i,j].fill_between(np.array(range(0,mu.shape[0]))*itest,mu + std, mu - std, color=cvec[jm], alpha=0.5)
+                
+                c = get_color(jm)
+                l = get_label(jm)
+                
+                ax[i,j].plot(np.array(range(0,mu.shape[0]))*itest,mu, label=l, linewidth=2, color=c)
+                ax[i,j].fill_between(np.array(range(0,mu.shape[0]))*itest,mu + std, mu - std, color=c, alpha=0.5)
                 
             ax[i,j].legend()
             if i == 0:
@@ -462,8 +473,24 @@ def plot_error_statistics(logLG_gesges, logLebm_gesges, rmse_gesges, path, itest
     plt.savefig(path + 'error_stats.pdf')    
     plt.show()
     return -1
+
+
+
+#%% evaluation plots: PDE residual and RMSE vs input space
+def plot_teval_statistics(jmodel_vec, rmse_eval_gesges, fleval_gesges, teval, path):
+
+    fig, axs = plt.subplots(1,2, figsize=(10,4))
     
-                    
+    axplot_model_comp(axs[0], jmodel_vec, rmse_eval_gesges[:,0], teval.detach().cpu().squeeze())
+    axs[0].set_title('RMSE')
+    
+    axplot_model_comp(axs[1], jmodel_vec, fleval_gesges[:,0], teval.detach().cpu().squeeze())
+    axs[1].set_title('PDE')
+    axs[1].set_ylim([0,1])
+    plt.savefig(path + 'teval_stats.pdf') 
+    plt.show()
+    return -1
+
 
 def loss_plot(loss_list, loss_legend): 
     #generic loss plot
@@ -473,3 +500,165 @@ def loss_plot(loss_list, loss_legend):
         plt.semilogy(loss_list[i])
     plt.legend(loss_legend)
 
+
+
+####
+def axplot_fill_between(ax, arr, xvec = -1, color=-1, label=''):
+    if type(xvec) == int:
+        xvec = np.range(arr.shape[1])
+    if type(color) == int:
+        color = 'b'
+    
+    mu = arr.mean(0)
+    std = arr.std(0)
+    
+    ax.plot(xvec, mu, color=color, label=label)
+    ax.fill_between(xvec, mu+std, mu-std, color=color, alpha=0.5)
+    
+
+def axplot_stat(ax, stat, pvec, sname, pname, jmodel_vec = [3,2,0,1]): #TODO: maybe existing plot functions can be used?
+    mu = np.mean(stat[:,:,:],-1)
+    std = np.std(stat[:,:,:],-1)
+    stat = np.swapaxes(stat, 0, 1)
+    stat = np.swapaxes(stat, 1, 2)
+    axplot_model_comp(ax, jmodel_vec, stat, pvec)
+    ax.set_title(sname)
+    ax.set_xlabel(pname)
+
+def axplot_model_comp(ax, jmodel_vec, arr, xvec):
+    for jm in jmodel_vec:
+        l = get_label(jm)
+        c = get_color(jm)
+        axplot_fill_between(ax,arr[jm],xvec, color=c, label=l)
+    ax.legend()
+    
+    
+def axplot_statistics(ax, stat_gesges, xvec = -1, model_vec = [3,2,0,1], title='', clabel=True, xlabel='iterations', x_opt = -1, s_opt='', step=1, legend=True):
+    Nmodel, Nrun, Nx = stat_gesges.shape
+    if type(xvec) == int:
+        xvec = np.arange(Nx)*step
+    
+    for jm in model_vec:
+        label = get_label(jm) if clabel else ''
+        buf = stat_gesges[jm,:,:]
+        axplot_fill_between(ax, buf, xvec = xvec, color=get_color(jm), label=label)
+    
+    ylim = get_ylim(x_opt, s_opt)
+    if type(ylim) != int: ax.set_ylim(ylim)
+    ax.set_title(title)
+    ax.set_xlabel(xlabel)
+    if legend: ax.legend()
+   
+
+def axplot_dpar_statistics(ax, dpar_gesges, dpar_true, title='', x_opt=0, step=1, model_vec = [3,2,0,1]):
+    xvec = np.arange(dpar_gesges.shape[-1])
+    for jp in range(dpar_gesges.shape[1]):
+        clabel = True if jp == 0 else False
+        axplot_statistics(ax, dpar_gesges[:,jp,:,:], clabel=clabel, title=title, x_opt = x_opt, s_opt='dpar', step=step, model_vec = model_vec)
+        ax.hlines(dpar_true[jp],0,xvec[-1],color='gray',linestyle='--')
+        
+        
+def get_ylim(x_opt, s_opt):
+    ylim = -1
+    if s_opt == 'dpar':
+        if x_opt == 1:
+            ylim=[0.1,0.4]
+            
+    if s_opt == 'rmse':
+        if x_opt == 1:
+            ylim=[0,15]
+        if x_opt == 101:
+            ylim=[0,0.4]
+            
+    if s_opt == 'logL val':
+        if x_opt == 1:
+            ylim=[-15,0]
+        if x_opt == 101:
+            ylim = [-1,0.2]
+            
+    if s_opt == 'dpde':
+        if x_opt == 1:
+            ylim=[0,1]
+        if x_opt == 3:
+            ylim=[0,0.1]
+        if x_opt == 101:
+            ylim=[0,0.01]
+    
+    return ylim
+        
+        
+def axplot_logL_comparison(ax, logLG_gesges, logLebm_gesges, x_opt, model_vec = [3,2,0,1], step=1):
+    Nmodel, _, Nrun, Nx = logLebm_gesges.shape
+    buf = np.zeros([Nmodel, Nrun, Nx])
+    buf = logLebm_gesges[:,1,:,:]
+    buf[0,:,:] = logLG_gesges[0,1,:,:]
+    buf[2,:,:] = logLG_gesges[2,1,:,:]
+    axplot_statistics(ax, buf, title='logL validation', x_opt = x_opt, model_vec = model_vec, s_opt = 'logL val', step=step)
+
+
+def plot_dpar_broken(dpar_gesges, dpar_true, x_opt=0, title='', spath='', step=1, model_vec = [3,2,0,1]):
+    xvec = np.arange(dpar_gesges.shape[-1])
+    
+    fig, axs = plt.subplots(2,1, sharex=True, figsize = (5.5,4))
+    
+    for ja, ax in enumerate(axs):
+        #plegend = True if ja == 1 else False
+        plegend = False
+        xlabel = '' if ja == 0 else 'iterations'
+            
+        for jp in range(dpar_gesges.shape[1]):
+            clabel = True if jp == 0 else False
+            axplot_statistics(ax, dpar_gesges[:,jp,:,:], clabel = clabel, x_opt = x_opt, s_opt='dpar', xlabel=xlabel, step=step, model_vec = model_vec, legend = plegend)
+            ax.hlines(dpar_true[jp],0,xvec[-1]*step,color='gray',linestyle='--')
+            
+    ax = axs[0]
+    ax2 = axs[1]
+    
+    # zoom-in / limit the view to different portions of the data
+    ax.set_ylim(.7,1.1)  # outliers only
+    ax2.set_ylim(.0,.1)  # most of the data
+    
+    # hide the spines between ax and ax2
+    ax.spines['bottom'].set_visible(False)
+    ax2.spines['top'].set_visible(False)
+    ax.xaxis.tick_top()
+    #ax.tick_params(labeltop=False)  # don't put tick labels at the top
+    ax2.xaxis.tick_bottom()
+    
+    
+    d = .015  # how big to make the diagonal lines in axes coordinates
+    kwargs = dict(transform=ax.transAxes, color='k', clip_on=False)
+    ax.plot((-d, +d), (-d, +d), **kwargs)        # top-left diagonal
+    ax.plot((1 - d, 1 + d), (-d, +d), **kwargs)  # top-right diagonal
+    
+    kwargs.update(transform=ax2.transAxes)  # switch to the bottom axes
+    ax2.plot((-d, +d), (1 - d, 1 + d), **kwargs)  # bottom-left diagonal
+    ax2.plot((1 - d, 1 + d), (1 - d, 1 + d), **kwargs)  # bottom-right diagonal
+
+    ax2.legend(loc="upper center")    
+    ax.set_title(title)
+    
+
+
+    
+def plot_par_eval(input_path0, fname0, Nrun, par_vec, par_label, jmodel_vec = [3,2,0,1]):
+    (dpar_ges, rmse_ges, dpde_ges, logL_ges), res = gather_run_data(input_path0, fname0, 5, par_vec, par_label)        
+    stat_vec = [dpar_ges[:,:,0,:], dpde_ges[:,:,0,:], rmse_ges[:,:,1,:], logL_ges[:,:,1,:]]
+    sname_vec = ['dpar','dpde','rmse','logL']
+    sname_vec = ['$|\Delta \lambda|$', '$f^2$', 'RMSE validation', 'logL validation']
+    
+    if par_label=='Ntr': par_label = '$N_{\\rm train}$'
+    fig, axs = plt.subplots(1,4, figsize=(24,4.5))
+    for j in range(4):
+        axplot_stat(axs[j], stat_vec[j], par_vec, sname_vec[j],par_label, jmodel_vec = jmodel_vec)
+        
+    return res
+    
+def plot_learning_curves(res, input_path, fname, step=1, model_vec=[3,2,0]):
+    plt.rcParams.update({'font.size': 14})
+    fig, ax = plt.subplots(1,4,figsize=(25,4))
+    axplot_dpar_statistics(ax[0], res.dpargesges[:,:,:,::step], res.dpar, title = 'parameters $\lambda$', x_opt = res.x_opt, model_vec = model_vec, step=step)
+    axplot_statistics(ax[2], res.rmse_gesges[:,1,:,:], title='RMSE validation', x_opt = res.x_opt, s_opt='rmse', model_vec = model_vec, step=step)
+    axplot_logL_comparison(ax[3], res.logLG_gesges, res.logLebm_gesges, x_opt = res.x_opt, model_vec = model_vec, step=step)
+    axplot_statistics(ax[1], res.fl_gesges[:,0,:,:], title='$f^2$', x_opt = res.x_opt, s_opt='dpde', model_vec = model_vec, step=step)
+    plt.savefig(input_path + 'pmetrics_' + fname + '.pdf')

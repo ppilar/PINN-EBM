@@ -11,18 +11,7 @@ import torch.optim as optim
 
 from .plots import plot_ebm, plot_pinn
 from .utils_navier_stokes import Net_NS, load_ns_data
-
-
-#######
-####### check dirs
-def check_dirs(path0, input_path):
-    #check if results directory exists and create if it does not
-    
-    if not os.path.exists(input_path):
-        os.mkdir(input_path)    
-    if not os.path.exists(input_path + 'input.py'):
-        shutil.copyfile(path0 + 'input.py', input_path + 'input.py')
-
+from .utils import get_label
 
 #######
 ####### initialization
@@ -55,17 +44,19 @@ def init_nets(dim, tmin_coll, tmax_coll, ymin, ymax, Uvec_pinn, fdrop_pinn, Uvec
         net_pinn_ebm = Net_NS(device).to(device)
         net_pinn0 = Net_NS(device).to(device)
         net_pinn_offset = Net_NS(device).to(device)
-        net_pinn_Gmix = Net_NS(device).to(device)
+        net_pinn0_2 = Net_NS(device).to(device)
+        net_nn = Net_NS(device).to(device)
     else:
         pinn_bounds = (tmin_coll, tmax_coll, ymin.item(), ymax.item())
         net_pinn_ebm = Net(Uvec_pinn, fdrop=fdrop_pinn, input_dim = dim, bounds = pinn_bounds, device = device)
         net_pinn0 = Net(Uvec_pinn, fdrop=fdrop_pinn, input_dim = dim, bounds = pinn_bounds, device = device)
         net_pinn_offset = Net(Uvec_pinn, fdrop=fdrop_pinn, input_dim = dim, bounds = pinn_bounds, device = device)
-        net_pinn_Gmix = Net(Uvec_pinn, fdrop=fdrop_pinn, input_dim = dim, bounds = pinn_bounds, device = device)
-    ebm_bounds = (-ymax.item(), ymax.item(), 0, 1)
+        net_pinn0_2 = Net(Uvec_pinn, fdrop=fdrop_pinn, input_dim = dim, bounds = pinn_bounds, device = device)
+        net_nn = Net(Uvec_pinn, fdrop=fdrop_pinn, input_dim = dim, bounds = pinn_bounds, device = device)
+    ebm_bounds = (-ymax.item(), ymax.item(), 0, 10)
     net_ebm = Net(Uvec_ebm, fdrop=fdrop_ebm, bounds = ebm_bounds).to(device)
     
-    nets_pinn = [net_pinn0, net_pinn_ebm, net_pinn_offset, net_pinn_Gmix]
+    nets_pinn = [net_pinn0, net_pinn_ebm, net_pinn_offset, net_pinn0_2, net_nn]
     return nets_pinn, net_ebm 
 
 
@@ -96,13 +87,14 @@ def get_optimizers(nets_pinn, net_ebm, lr_pinn, lr_ebm):
     #initialize optimizers
     
     #Adam
-    optimizer_pinn_ebm = optim.Adam(nets_pinn[1].parameters(), lr=lr_pinn)
-    optimizer_pinn0 = optim.Adam(nets_pinn[0].parameters(), lr=lr_pinn)
-    optimizer_pinn_offset = optim.Adam(nets_pinn[2].parameters(), lr=lr_pinn)
-    optimizer_pinn_Gmix = optim.Adam(nets_pinn[3].parameters(), lr=lr_pinn)
-    optimizer_ebm = optim.Adam(net_ebm.parameters(), lr=lr_ebm)
+    optimizer_pinn_ebm = optim.Adam(nets_pinn[1].parameters(), lr=lr_pinn) #1
+    optimizer_pinn0 = optim.Adam(nets_pinn[0].parameters(), lr=lr_pinn) #0
+    optimizer_pinn_offset = optim.Adam(nets_pinn[2].parameters(), lr=lr_pinn) #2
+    optimizer_pinn0_2 = optim.Adam(nets_pinn[3].parameters(), lr=lr_pinn) #3
+    optimizer_nn = optim.Adam(nets_pinn[4].parameters(), lr=lr_pinn) #4
+    optimizer_ebm = -1# optim.Adam(net_ebm.parameters(), lr=lr_ebm)
     
-    optimizers_pinn = [optimizer_pinn0, optimizer_pinn_ebm, optimizer_pinn_offset, optimizer_pinn_Gmix]
+    optimizers_pinn = [optimizer_pinn0, optimizer_pinn_ebm, optimizer_pinn_offset, optimizer_pinn0_2, optimizer_nn]
     
     return optimizers_pinn, optimizer_ebm
 
@@ -111,7 +103,7 @@ def get_optimizers(nets_pinn, net_ebm, lr_pinn, lr_ebm):
 ################
 ###############
 
-def get_res(y_train_batch, y_net_train):
+def get_residuals(y_train_batch, y_net_train):
     #get residual between training data and PINN prediction
     
     res = (y_train_batch.squeeze() - y_net_train.squeeze())
@@ -154,7 +146,8 @@ def get_ttrain_tcoll(tmin, tmax, tmin_coll, tmax_coll, N_train, N_coll, N_test =
     if dim == 1:
         t_train = torch.linspace(tmin[0], tmax[0], N_train)
         t_test = torch.linspace(tmax[0], tmax_coll[0], N_test)
-        t_coll = torch.linspace(tmin_coll[0], tmax_coll[0], N_coll)
+        coff = tmax_coll[0]*0.02
+        t_coll = torch.linspace(tmin_coll[0]-coff, tmax_coll[0]+coff, N_coll)
     if dim == 2:
         sN_train = int(np.sqrt(N_train))
         sN_test = int(np.sqrt(N_test))
@@ -180,71 +173,6 @@ def get_ttrain_tcoll(tmin, tmax, tmin_coll, tmax_coll, N_train, N_coll, N_test =
         t_coll[:,0], t_coll[:,1]  = buf0.flatten(), buf1.flatten()
     
     return t_train, t_test, t_coll
-    
-    
-def train_ebm(ds, net_pinn, net_ebm, optimizer_ebm, t_train, y_train, batch_size_train, fmeq, Nebm, Jebm, tebm_avg, device):
-    #initialize EBM    
-    print('init_ebm!')
-
-    net_pinn.eval()
-    net_ebm.train()    
-    
-    t_train.requires_grad = True
-    x_net_train = net_pinn.forward(t_train)
-    ds.set_temp(t_train, x_net_train, net_pinn.dpar) 
-    y_net_train = fmeq(x_net_train, net_pinn.mpar).detach()
-    t_train.requires_grad = False
-    
-    ebm_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(
-        y_net_train, y_train), batch_size=batch_size_train, num_workers=0,  shuffle=True) 
-    
-    tebm = time.time()
-    it_ebm = 0
-    j = 0
-    while(True):
-        for i, batch in enumerate(ebm_loader):
-            y_net_batch = batch[0]
-            y_batch = batch[1]
-            
-            res = get_res(y_batch, y_net_batch)
-            J = get_mean_NLL(net_ebm, res, device = device)
-            
-            optimizer_ebm.zero_grad()
-            J.backward()
-            optimizer_ebm.step()
-            Jebm.append(J.item())
-            it_ebm += 1
-            
-            if it_ebm == Nebm:
-                break
-            
-        if j > 0: tebm_avg = (tebm_avg*(j) + time.time() - tebm)/(j+1)        
-        print("\r", 'j=' + str(j) + ', it=' + str(it_ebm), end="")
-        j += 1
-        if it_ebm == Nebm:
-            break
-        
-        
-    net_pinn.train()
-    net_ebm.train()
-    return net_ebm, res, tebm_avg, Jebm
-
-def get_mean_NLL(net, res, device = 'cpu'):
-    #calculate NLL for EBM
-    
-    res = res.flatten().unsqueeze(1)    
-    Nres = res.shape[0]
-    lb = (res.min() - 5*res.std()).detach()
-    ub = (res.max() + 5*res.std()).detach()
-    rvec = torch.linspace(lb, ub, 1001, device=device) 
-    buf_Z = torch.exp(net(rvec.unsqueeze(1))).squeeze()
-    Z = torch.trapezoid(buf_Z, rvec)
-    buf_res = net(res)
-    
-    J = -torch.sum(buf_res) + Nres*torch.log(Z)
-    J2 = J/Nres
-    
-    return J2
 
 
 
@@ -257,48 +185,51 @@ def get_fmeq_off(fmeq0, off):
 
 
 
-def get_test_error(jm, ds, net_pinn, net_ebm, t_train, f_train, y_train, t_test, f_test, y_test, fmeq, fld0,  device):
+def get_test_error(jm, ds, net_pinn, ebm, t_train, f_train, y_train, t_test, f_test, y_test, fmeq, fld0, flf,  device):
     #calculate RMSE and logL on test data
     
     net_pinn.eval()
-    net_ebm.eval()
+    ebm.net_ebm.eval()
     
     t_test.requires_grad = True
     x_net_test = net_pinn.forward(t_test)
     ds.set_temp(t_test, x_net_test, net_pinn.dpar)
-    y_net_test = fmeq(x_net_test, net_pinn.mpar)
-    res_test =  get_res(y_test, y_net_test).float()
+    f_net_test = fmeq(x_net_test, net_pinn.mpar)
+    res_test =  get_residuals(y_test, f_net_test).float()
     
     t_train.requires_grad = True
     x_net_train = net_pinn.forward(t_train)
     ds.set_temp(t_train, x_net_train, net_pinn.dpar)
-    y_net_train = fmeq(x_net_train, net_pinn.mpar)
-    res_train = get_res(y_train, y_net_train).float()
+    f_net_train = fmeq(x_net_train, net_pinn.mpar)
+    res_train = get_residuals(y_train, f_net_train).float()
     
     if ds.x_opt != 101:
         rmse_train = torch.mean(torch.abs(x_net_train.detach().cpu().squeeze() - f_train))
         rmse_test = torch.mean(torch.abs(x_net_test.detach().cpu().squeeze() - f_test))
     else:        
-        rmse_train = torch.mean(torch.abs((y_net_train  - net_pinn.opar).detach().cpu().squeeze() - f_train))
-        rmse_test = torch.mean(torch.abs((y_net_test  - net_pinn.opar).detach().cpu().squeeze() - f_test))
+        rmse_train = torch.mean(torch.abs((f_net_train  - net_pinn.opar).detach().cpu().squeeze() - f_train))
+        rmse_test = torch.mean(torch.abs((f_net_test  - net_pinn.opar).detach().cpu().squeeze() - f_test))
     
   
     std_G = res_train.std()
-    logL_G_train = -1/(2*std_G**2)*fld0(y_train, y_net_train).mean() - 0.5*torch.log(2*torch.pi*std_G**2)
-    logL_G_test = -1/(2*std_G**2)*fld0(y_test, y_net_test).mean() - 0.5*torch.log(2*torch.pi*std_G**2)
+    logL_G_train = -1/(2*std_G**2)*fld0(y_train, f_net_train).mean() - 0.5*torch.log(2*torch.pi*std_G**2)
+    logL_G_test = -1/(2*std_G**2)*fld0(y_test, f_net_test).mean() - 0.5*torch.log(2*torch.pi*std_G**2)
     if jm in [1,3]:
-        logL_ebm_train = -get_mean_NLL(net_ebm, res_train, device = device)
-        logL_ebm_test = -get_mean_NLL(net_ebm, res_test, device = device)
+        logL_ebm_train = -ebm.get_mean_NLL(res_train)
+        logL_ebm_test = -ebm.get_mean_NLL(res_test)
     else:
         logL_ebm_train = torch.tensor(-1)
         logL_ebm_test = torch.tensor(-1)
 
     
+    fl_train = torch.mean(flf(t_train, x_net_train, net_pinn.dpar))
+    fl_test= torch.mean(flf(t_test, x_net_test, net_pinn.dpar))
+    
     net_pinn.train()
-    net_ebm.train()
+    ebm.net_ebm.train()
     t_train.requires_grad = False
     
-    return logL_G_train, logL_G_test, logL_ebm_train, logL_ebm_test, rmse_train, rmse_test
+    return logL_G_train, logL_G_test, logL_ebm_train, logL_ebm_test, rmse_train, rmse_test, fl_train, fl_test
 
 
 
@@ -314,11 +245,22 @@ def get_ebm_curve(net_ebm, opar, noise, n_opt, n_fac, device):
     return pdf_ebm, pdf_true, y_plot
 
 
+def evaluate_rmse_dpde(net_pinn, ds, teval, flf, fx, device):
+    net_pinn.zero_grad()
+    net_pinn.eval()
+    teval.requires_grad = True
+    xeval = net_pinn.forward(teval)
+    ds.set_temp(teval, xeval, net_pinn.dpar)
+    fleval = flf(teval, xeval, net_pinn.dpar)        
+    feval = fx(teval.detach().cpu()).to(device)
+    rmse_eval = torch.sqrt((xeval-feval)**2)
+    
+    return np.array(fleval.detach().cpu()).squeeze(), np.array(rmse_eval.detach().cpu()).squeeze(), teval.detach().cpu()
 
 #################
 ################# collect parameters etc.
 
-def get_epoch_stats(losses, Nrun, itges, x_opt, jm, itest, iplot, ds, net_pinn, net_ebm, res, t_train, f_train, y_train, t_test, f_test, y_test, fmeq, fld0, fx, fn, tmin, tmax, tmin_coll, tmax_coll, Npar, Jges, dparges, lossdges, lossfges, logLG_ges, logLebm_ges, rmse_ges, device):
+def get_epoch_stats(losses, Nrun, itges, x_opt, jm, itest, iplot, ds, net_pinn, ebm, res, t_train, f_train, y_train, t_test, f_test, y_test, fmeq, fld0, flf, fx, fn, tmin, tmax, tmin_coll, tmax_coll, Npar, Jges, dparges, lossdges, lossfges, logLG_ges, logLebm_ges, rmse_ges, fl_ges, device):
     #calculate some statistics after certain number of epochs
     
     loss_d0, loss_f0, loss_f1, loss = losses
@@ -331,51 +273,53 @@ def get_epoch_stats(losses, Nrun, itges, x_opt, jm, itest, iplot, ds, net_pinn, 
     
     #calculate test error
     if itges%(itest) == 0:# and x_opt != 101:
-        logL_G_train, logL_G_test, logL_ebm_train, logL_ebm_test, rmse_train, rmse_test = get_test_error(jm, ds, net_pinn, net_ebm, t_train, f_train, y_train, t_test, f_test, y_test, fmeq, fld0, device)
+        logL_G_train, logL_G_test, logL_ebm_train, logL_ebm_test, rmse_train, rmse_test, fl_train, fl_test = get_test_error(jm, ds, net_pinn, ebm, t_train, f_train, y_train, t_test, f_test, y_test, fmeq, fld0, flf, device)
         logLG_ges[jm][0].append(logL_G_train.detach().item())
         logLG_ges[jm][1].append(logL_G_test.detach().item())
         logLebm_ges[jm][0].append(logL_ebm_train.detach().item())
         logLebm_ges[jm][1].append(logL_ebm_test.detach().item())
         rmse_ges[jm][0].append(rmse_train.detach().item())
         rmse_ges[jm][1].append(rmse_test.detach().item())
+        fl_ges[jm][0].append(fl_train.detach().item())
+        fl_ges[jm][1].append(fl_test.detach().item())
     
     if itges%(iplot) == 0 and itges > 0 and Nrun == 1:
         if jm in [1,3]:
-            plot_ebm(net_ebm, res, net_pinn.opar, fn, res.min().item(), res.max().item(), '', device)
+            plot_ebm(ebm.net_ebm, res, net_pinn.opar, fn, res.min().item(), res.max().item(), '', device)
         plot_pinn((net_pinn,), fx, t_train, y_train, t_test, y_test, tmin, tmax, tmin_coll, tmax_coll, '', device)
         net_pinn.train().to(device)
         
-    return Jges, dparges, lossdges, lossfges, logLG_ges, logLebm_ges, rmse_ges
+    return Jges, dparges, lossdges, lossfges, logLG_ges, logLebm_ges, rmse_ges, fl_ges
 
 
-def calculate_stats(dpargesges, logLG_gesges, logLebm_gesges, rmse_gesges, dpar_true):
-    #calculate statistics over multiple runs
+def calculate_stat(stat):
+    s_est = stat[:,:,:,-1]
+    mu = s_est.mean(2)
+    std = s_est.std(2)
+    return (s_est, mu, std)
+
+
+def calculate_stats(dpargesges, logLG_gesges, logLebm_gesges, rmse_gesges, fleval_gesges, dpar_true):
+    #calculate statistics over multiple runs  
+
+    dpar_true = np.array(dpar_true)
     
-    Navg = 100
-    dpar_true = np.expand_dims(np.expand_dims(dpar_true,0),2)
+    dpar_buf = np.zeros(dpargesges.shape)
+    for j in range(dpar_true.size):
+        dpar_buf[:,j,:,:] = np.abs(dpargesges[:,j,:,:] - dpar_true[j])
+    tdpar = calculate_stat(dpar_buf)
     
-    dpar_est = np.mean(dpargesges[:,:,:,-Navg:],3)
-    mu_delta_dpar = np.mean(np.abs(dpar_est - dpar_true),2)
-    std_delta_dpar = np.std(np.abs(dpar_est - dpar_true),2)
-    tdpar = (dpar_est, mu_delta_dpar, std_delta_dpar)
+    tlogLG = calculate_stat(logLG_gesges)
+    tlogLebm = calculate_stat(logLebm_gesges)
+    tlogL = tlogLG
+    for j in range(3):
+        tlogL[j][1] = tlogLebm[j][1]
+        tlogL[j][3] = tlogLebm[j][3]
     
-    logLG_est = np.mean(logLG_gesges[:,:,:,-Navg:],3)
-    mu_logL = np.mean(logLG_est, 2)
-    std_logL = np.std(logLG_est, 2)
-    
-    logLebm_est = np.mean(logLebm_gesges[:,:,:,-Navg:],3)    
-    logL_est = logLG_est
-    logL_est[1,:,:] = logLebm_est[1,:,:]
-    mu_logL[1,:] = np.mean(logLebm_est[1,:],1)
-    std_logL[1,:] = np.std(logLebm_est[1,:],1)
-    tlogL = (logL_est, mu_logL, std_logL)
-    
-    rmse_est = np.mean(rmse_gesges[:,:,:,-Navg:],3)
-    mu_rmse = np.mean(rmse_est, 2)
-    std_rmse = np.std(rmse_est, 2)
-    trmse = (rmse_est, mu_rmse, std_rmse)
-    
-    return tdpar, tlogL, trmse
+    trmse = calculate_stat(rmse_gesges)
+    tfl = calculate_stat(fleval_gesges)
+
+    return tdpar, tlogL, trmse, tfl
 
 
 def print_stats(itges, j, jm, Jges, loss_d00, loss_f00, ld_fac, lf_fac, epoch_data, net_pinn):
@@ -400,29 +344,43 @@ def print_stats(itges, j, jm, Jges, loss_d00, loss_f00, ld_fac, lf_fac, epoch_da
           + loss_str
           , end="")
 
+def save_stats_to_txt(res, fname, input_path):
+    tdpar, tlogL, trmse, tfl = calculate_stats(res.dpargesges, res.logLG_gesges, res.logLebm_gesges, res.rmse_gesges, res.fl_gesges, res.dpar)
+    fname = 'x'+str(res.x_opt)+'n'+res.n_opt+'r'+str(res.Nrun)
+    print_table(tdpar, trmse, tlogL, tfl, fname, input_path)
 
-def print_table(tdpar, trmse, tlogL, fname, fpath):
+
+def print_table(tdpar, trmse, tlogL, tfl, fname, fpath):
     #create latex table entries of statistics 
     
     dig = 2
-    fac = 1e-2
+    fac = 1
     Npar = tdpar[0].shape[1]
     
-    jleg = ['$|\Delta a|$ ', 'RMSE', 'logL']
-    tvec = (tdpar, trmse, tlogL)
-    facvec = (1e-2, 1, 1)
+    jm_vec = [3, 2, 0]
+    model_str = '& & '
+    for jm in jm_vec:
+        model_str += get_label(jm) + ' & '
+    
+    jleg = ['$|\Delta \\lambda|$ ', 'RMSE', 'logL', '$|\Delta \\text{PDE}|$']
+    jtt_ind = [1, 0, 1, 0]
+    tvec = (tdpar, trmse, tlogL, tfl)
+    facvec = (1e-2, 1, 1, 1e-2)
     with open(fpath+fname+'.txt', 'w') as f:
         original_stdout = sys.stdout 
         sys.stdout = f # Change the standard output to the file we created.
-        for j in range(3):        
+        
+        print(model_str) #print model names
+        
+        for j in range(4):        
             
             fac = facvec[j]
             tbuf = tvec[j]
-            jtt_vec = [1] if j > 0 else range(Npar)
+            jtt_vec = [jtt_ind[j]] if j > 0 else range(Npar) #choose between train and validation data
             for jtt in jtt_vec: #loop over multiple pars       
                 print('&', jleg[j], end='')
-                for jm in [1, 2, 0]: #loop over models
-                    if jm == 1:
+                for jm in jm_vec: #loop over models
+                    if jm == 3:
                         print(' & \\textbf{' + str(np.round(tbuf[1][jm,jtt]/fac, dig).item()) + '}$\pm$' + str(np.round(tbuf[2][jm,jtt]/fac, dig).item()), end='')
                     else:
                         print(' & ' + str(np.round(tbuf[1][jm,jtt]/fac, dig).item()) + '$\pm$' + str(np.round(tbuf[2][jm,jtt]/fac, dig).item()), end='')
@@ -446,13 +404,7 @@ class Net(nn.Module): #map from t to x
         self.mpar = nn.Parameter(0.1*torch.ones(Npar))
         self.opar = nn.Parameter(0*torch.ones(1))
         
-        #G mixture parameters
-        Nc = 3
-        self.pis0 = nn.Parameter(0.2*torch.ones(Nc)) #logits
-        self.mus = nn.Parameter(0.5*torch.ones(Nc))
-        self.sigs0 = nn.Parameter(0.1*torch.ones(Nc)) #logits
-        
-        #if type(lb) is tuple:    
+           
         self.lb = torch.tensor(bounds[0]).float().to(device)
         self.ub = torch.tensor(bounds[1]).float().to(device)
         
@@ -480,6 +432,6 @@ class Net(nn.Module): #map from t to x
         X = self.dr(X)  
         X = self.layers[-1](X)
         
-        X = 0.5*((X + 1.0)*(self.yub - self.ylb)) + self.ylb
+        X = 0.5*((X + 1.0)*(self.yub - self.ylb)) + self.ylb #reverse normalization of output
 
         return X
