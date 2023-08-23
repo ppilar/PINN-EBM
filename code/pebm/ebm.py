@@ -94,7 +94,7 @@ class EBM():
     def set_pdf_ges(self, residuals_ges):
         self.rvec_ges = self.get_rvec(residuals_ges)
         self.set_Z()
-        self.pdf_ges = (buf/self.Z).detach().cpu()
+        self.pdf_ges = self.get_pdf(self.rvec_ges).detach().cpu()
     
     #calculate indicator to determine if EBM has been successfully trained (i.e. PDF=0 away from data)
     def set_indicator(self):
@@ -129,7 +129,8 @@ class EBM():
     
     #get PDF on rvec
     def get_pdf(self, rvec):
-        buf = torch.exp(self.net_ebm(rvec))
+        self.set_Z()
+        buf = torch.exp(self.net_ebm(rvec.flatten().unsqueeze(1))).squeeze()
         return (buf/self.Z).detach().cpu()
     
     

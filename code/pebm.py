@@ -139,8 +139,7 @@ for jN in range(Nrun):  #loop over different runs
                 t0 = time.time()
                 #initialize EBM
                 if itges == i_init_ebm and jm in [1,3]:                    
-                    tebm = time.time()
-                    Ntry = 0
+                    tebm = time.time()                    
                     while (True):
                         net_pinn.eval()                        
                         t_train.requires_grad = True
@@ -157,9 +156,6 @@ for jN in range(Nrun):  #loop over different runs
                         #print('\nindicator:',str(ebm.indicator),'ind0:',str(indicator0))
                         if ebm.indicator < ebm.thr:
                             break
-                        Ntry += 1
-                        if Ntry == 3: #raising ebm_ubound can help EBM training to converge
-                            ebm_ubound = 5
                     res.tebm_ges[jm] = time.time() - tebm
                     
                 #get batches

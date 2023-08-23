@@ -37,7 +37,9 @@ if x_opt == 1: #exponential function
         Npinn = 50000 
         n_opt = '3G'
         lf_fac2 = 1
-        par_vec = [20, 50, 100, 200]
+        par_vec = [50, 100, 200]
+        #par_vec = [20]
+        #ebm_ubound = 5 #results in better EBM convergence in case of few training points
     else:
         stop_execution()
 elif x_opt == 3: #Bessel function
