@@ -5,6 +5,7 @@ Created on Tue May 10 16:41:38 2022
 @author: phipi206
 """
 
+import matplotlib
 import matplotlib.pyplot as plt
 import torch
 import numpy as np
@@ -189,20 +190,12 @@ def plot_pinn_1d(net_pinn, fx, t_train, y_train, t_test, y_test, tmin, tmax, pat
         netp.to('cpu')
         
     t_plot = t_plot.to('cpu')
-    #if N > 1:
-    #    cvec = ['r','b','g','c']
-    #else:
-    #    cvec = ['b']
         
     plt.figure()
     for xnp, j in zip(xnp_ges, range(N)):
         c = get_color(j)
         plt.plot(t_plot, xnp, color=c)
         
-    # if N == 4:
-    #     lvec = ['pinn0', 'pinn-ebm', 'pinn-off', 'pinn0-ebm', 'true']
-    # else:
-    #     lvec = ['pinn-ebm', 'true']
         
     lvec = get_lvec()
         
@@ -385,7 +378,6 @@ def plot_logL(jm, logLG_ges, logLebm_ges, rmse_ges, path, itest=100):
                     ax[i,j].plot(buf, np.array(logLG_ges[2][j]), color='g', label='pinn off')
                 if len(logLG_ges[3][j]) > 0:
                     ax[i,j].plot(buf, np.array(logLG_ges[3][j]), color='c', label='pinn0 ebm')
-                #ax[i,j].legend(['pinn0', 'pinn ebm', 'pinn off'])
                 if j == 0:
                     ax[i,j].set_title('log L - train')
                 else:
@@ -399,7 +391,6 @@ def plot_logL(jm, logLG_ges, logLebm_ges, rmse_ges, path, itest=100):
                     ax[i,j].plot(buf, np.array(rmse_ges[2][j]), color='g', label='pinn off')
                 if len(rmse_ges[3][j]) > 0:
                     ax[i,j].plot(buf, np.array(rmse_ges[3][j]), color='c', label='pinn0 ebm')
-                #ax[i,j].legend(['pinn0', 'pinn ebm', 'pinn off'])
                 if j == 0:
                     ax[i,j].set_title('rmse - train')
                 else:
@@ -425,8 +416,6 @@ def plot_error_statistics(logLG_gesges, logLebm_gesges, rmse_gesges, path, itest
     rmse_mu = rmse_gesges.mean(2)
     rmse_std = rmse_gesges.std(2)
     
-    #cvec = ['r','b','g','c']
-    #lvec = ['pinn0', 'pinn-ebm', 'pinn-off', 'pinn0-ebm']
     fig, ax = plt.subplots(2, 2, figsize=(10,7))
     for i in range(2):
         for j in range(2):
@@ -516,7 +505,7 @@ def axplot_fill_between(ax, arr, xvec = -1, color=-1, label=''):
     ax.fill_between(xvec, mu+std, mu-std, color=color, alpha=0.5)
     
 
-def axplot_stat(ax, stat, pvec, sname, pname, jmodel_vec = [3,2,0,1]): #TODO: maybe existing plot functions can be used?
+def axplot_stat(ax, stat, pvec, sname, pname, jmodel_vec = [3,2,0,1]):
     mu = np.mean(stat[:,:,:],-1)
     std = np.std(stat[:,:,:],-1)
     stat = np.swapaxes(stat, 0, 1)
@@ -555,7 +544,7 @@ def axplot_dpar_statistics(ax, dpar_gesges, dpar_true, title='', x_opt=0, step=1
     for jp in range(dpar_gesges.shape[1]):
         clabel = True if jp == 0 else False
         axplot_statistics(ax, dpar_gesges[:,jp,:,:], clabel=clabel, title=title, x_opt = x_opt, s_opt='dpar', step=step, model_vec = model_vec)
-        ax.hlines(dpar_true[jp],0,xvec[-1],color='gray',linestyle='--')
+        ax.hlines(dpar_true[jp],0,xvec[-1]*step,color='gray',linestyle='--')
         
         
 def get_ylim(x_opt, s_opt):
@@ -576,6 +565,12 @@ def get_ylim(x_opt, s_opt):
         if x_opt == 101:
             ylim = [-1,0.2]
             
+    if s_opt == 'NLL val':
+        if x_opt == 1:
+            ylim=[0,15]
+        if x_opt == 101:
+            ylim = [-0.2,1]
+            
     if s_opt == 'dpde':
         if x_opt == 1:
             ylim=[0,1]
@@ -593,7 +588,30 @@ def axplot_logL_comparison(ax, logLG_gesges, logLebm_gesges, x_opt, model_vec = 
     buf = logLebm_gesges[:,1,:,:]
     buf[0,:,:] = logLG_gesges[0,1,:,:]
     buf[2,:,:] = logLG_gesges[2,1,:,:]
-    axplot_statistics(ax, buf, title='logL validation', x_opt = x_opt, model_vec = model_vec, s_opt = 'logL val', step=step)
+    #axplot_statistics(ax, -buf, title='logL validation', x_opt = x_opt, model_vec = model_vec, s_opt = 'logL val', step=step)    
+    axplot_statistics(ax, -buf, title='NLL validation', x_opt = x_opt, model_vec = model_vec, s_opt = 'NLL val', step=step)
+
+
+def plot_residuals(res, jN=0):
+    fig, axs = plt.subplots(4,2, figsize=(6,8))
+    fig.tight_layout(h_pad=3)
+    for jm in res.pars['jmodel_vec']:
+        if jm in [0,2]:
+            logLbuf = res.logLG_gesges[jm][:,jN,-1]
+        else:
+            logLbuf = res.logLebm_gesges[jm][:,jN,-1]
+        for k in range(2):
+            pdf_buf = res.rpdfs_ges[jN][jm]
+            res_buf = res.residuals_train_ges[jN][jm] if k == 0 else res.residuals_test_ges[jN][jm]
+            
+            axs[jm,k].plot(res.rvec,pdf_buf)
+            axs[jm,k].hist(res_buf, 20, density=True)
+            
+            dres = res_buf.max() - res_buf.min()
+            axs[jm,k].set_title('logL:'+ str(np.round(logLbuf[k].item(),3)))
+            tstr = 'logL:'+ str(np.round(logLbuf[k].item(),3))
+            tstr += '\n' + 'dres:'+ str(np.round(dres.item(),3))
+            axs[jm,k].set_title(tstr)
 
 
 def plot_dpar_broken(dpar_gesges, dpar_true, x_opt=0, title='', spath='', step=1, model_vec = [3,2,0,1]):
@@ -638,19 +656,29 @@ def plot_dpar_broken(dpar_gesges, dpar_true, x_opt=0, title='', spath='', step=1
     ax2.legend(loc="upper center")    
     ax.set_title(title)
     
+    
 
 
     
 def plot_par_eval(input_path0, fname0, Nrun, par_vec, par_label, jmodel_vec = [3,2,0,1]):
-    (dpar_ges, rmse_ges, dpde_ges, logL_ges), res = gather_run_data(input_path0, fname0, 5, par_vec, par_label)        
-    stat_vec = [dpar_ges[:,:,0,:], dpde_ges[:,:,0,:], rmse_ges[:,:,1,:], logL_ges[:,:,1,:]]
-    sname_vec = ['dpar','dpde','rmse','logL']
-    sname_vec = ['$|\Delta \lambda|$', '$f^2$', 'RMSE validation', 'logL validation']
+    stat_vec, sname_vec,  res = gather_run_data(input_path0, fname0, Nrun, par_vec, par_label)        
     
-    if par_label=='Ntr': par_label = '$N_{\\rm train}$'
+    if par_label=='Ntr': par_label = '$N_d$'#'$N_{\\rm train}$'
+    if par_label=='fn': par_label = '$f_n$'
+    if par_label=='lf2': par_label = '$\omega$'
     fig, axs = plt.subplots(1,4, figsize=(24,4.5))
     for j in range(4):
-        axplot_stat(axs[j], stat_vec[j], par_vec, sname_vec[j],par_label, jmodel_vec = jmodel_vec)
+        axplot_stat(axs[j], stat_vec[j], par_vec, sname_vec[j], par_label, jmodel_vec = jmodel_vec)
+        
+        if j == 0:
+           axs[j].set_ylim([-0.0075,0.16])
+        axs[j].set_xscale('log')
+        if par_label == '$N_d$':
+            
+            xtick_labels = axs[j].get_xticklabels(minor=True)
+            xtick_labels[8] = matplotlib.text.Text(20, 0, '$\\mathdefault{2 x 10^{1}}$')
+            axs[j].set_xticklabels(xtick_labels, minor=True)
+
         
     return res
     

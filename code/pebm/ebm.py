@@ -10,14 +10,15 @@ import torch.optim as optim
 
 class EBM():
     #initialize cEBM
-    def __init__(self, ebm_ubound, Uvec_ebm, ymax, fdrop_ebm, lr_ebm, batch_size_train, Nebm, device): #TODO: initialize net_ebm in here?
-        self.ebm_ubound = ebm_ubound
-        self.device = device    
-        self.Uvec_ebm = Uvec_ebm
-        self.fdrop_ebm = fdrop_ebm
-        self.lr_ebm = lr_ebm
-        self.bs_train = batch_size_train
-        self.Nebm = Nebm
+    def __init__(self, pars, ymax, device):
+        self.ebm_ubound = pars['ebm_ubound']
+        self.Uvec_ebm = pars['Uvec_ebm']
+        self.fdrop_ebm = pars['fdrop_ebm']
+        self.lr_ebm = pars['lr_ebm']
+        self.bs_train = pars['bs_train']
+        self.Nebm = pars['Nebm']
+        
+        self.device = device
         self.init = 0
         self.indicator = 1000
         
@@ -35,8 +36,8 @@ class EBM():
     def initialize(self, residuals, Jebm, tebm_avg):
         
         res_max = torch.max(torch.abs(residuals.min()), torch.abs(residuals.max()))
-        ebm_bounds = (-res_max.item(), res_max.item(), 0, self.ebm_ubound)
-        self.net_ebm = Net(self.Uvec_ebm, fdrop=self.fdrop_ebm, bounds = ebm_bounds).to(self.device)
+        self.ebm_bounds = (-res_max.item(), res_max.item(), 0, self.ebm_ubound)
+        self.net_ebm = Net(self.Uvec_ebm, fdrop=self.fdrop_ebm, bounds = self.ebm_bounds).to(self.device)
         self.optimizer_ebm = optim.Adam(self.net_ebm.parameters(), lr=self.lr_ebm)
         self.scheduler_ebm = torch.optim.lr_scheduler.ExponentialLR(self.optimizer_ebm, gamma=0.3)
         self.init = 1

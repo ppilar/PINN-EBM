@@ -15,56 +15,74 @@ def stop_execution():
 rand_init, s = init_random_seeds(s=0)
 path0 = '../results/' #folder where results will be saved
 
+pars = dict()
+set_par(pars, 'jmodel_vec', [0, 3, 2]) #which models to include in runs
+set_par(pars, 'x_opt', 1) #pick differential equation
+par_label = 'fn'  #pick parameter to loop over (n, lf2 (=omega), Ntr, fn)
 
-jmodel_vec = [0,3,2] #which models to include in runs
-x_opt = 101 #pick differential equation
-par_label = 'n'  #pick parameter to loop over (n, lf2 (=omega), Ntr)
 
-
-if x_opt == 1: #exponential function
+if pars['x_opt'] == 1: #exponential function
     if par_label == 'n':
-        Nrun = 10
-        Npinn = 40000        
-        lf_fac2 = 1
+        pars['Nrun'] = 10
+        pars['Npinn'] = 40000        
+        pars['lf_fac2'] = 1
         par_vec = ['G','u', '3G', '3G0']
     elif par_label == 'lf2':
-        Nrun = 5
-        Npinn = 50000        
-        n_opt = '3G'
+        pars['Nrun'] = 5
+        pars['Npinn'] = 50000        
+        pars['n_opt'] = '3G'
         par_vec = [1,2,5,10,20,50]
     elif par_label == 'Ntr':
-        Nrun = 5
-        Npinn = 50000 
-        n_opt = '3G'
-        lf_fac2 = 1
-        par_vec = [50, 100, 200]
-        #par_vec = [20]
-        #ebm_ubound = 5 #results in better EBM convergence in case of few training points
+        pars['Nrun'] = 5
+        pars['Npinn'] = 50000 
+        pars['n_opt'] = '3G'
+        pars['lf_fac2'] = 1
+        par_vec = [20, 50, 100, 200]
+    elif par_label == 'fn':
+        pars['Nrun'] = 5
+        pars['Npinn'] = 50000      
+        pars['n_opt'] = '3G'
+        pars['lf_fac2'] = 1
+        #par_vec = [0.1, 0.25, 0.5]
+        par_vec = [0.2, 0.5, 0.75, 1, 2]
     else:
         stop_execution()
-elif x_opt == 3: #Bessel function
+elif pars['x_opt'] == 3: #Bessel function
     if par_label == 'n':
-        lf_fac2 = 1
-        Nrun = 10
-        Npinn = 100000
+        pars['lf_fac2'] = 1
+        pars['Nrun'] = 10
+        pars['Npinn'] = 100000
         par_vec = ['3G']
     elif par_label == 'lf2':
-        Nrun = 5
-        Npinn = 50000
-        n_opt = '3G'
+        pars['Nrun'] = 5
+        pars['Npinn'] = 50000
+        pars['n_opt'] = '3G'
         par_vec = [1,2,5,10,20,50]
+    elif par_label == 'Ntr':
+        pars['Nrun'] = 5
+        pars['Npinn'] = 50000 
+        pars['n_opt'] = '3G'
+        pars['lf_fac2'] = 1
+        par_vec = [20, 50, 100, 200]
+    elif par_label == 'fn':
+        pars['Nrun'] = 5
+        pars['Npinn'] = 50000      
+        pars['n_opt'] = '3G'
+        pars['lf_fac2'] = 1
+        #par_vec = [0.1, 0.25, 0.5]
+        par_vec = [0.1, 0.2, 0.5, 0.75, 1, 2]
     else:
         stop_execution()
-elif x_opt == 101: #Navier Stokes
-    Nrun = 5
+elif pars['x_opt'] == 101: #Navier Stokes
+    pars['Nrun'] = 5
     if par_label == 'n':
-        lf_fac2 = 50 # omega = 50 better for PINN-EBM
-        lf_fac2_alt = 1 # PINN and PINN-off better with omega=1
-        Npinn = 100000
+        pars['lf_fac2'] = 50 # omega = 50 better for PINN-EBM
+        pars['lf_fac2_alt'] = 1 # PINN and PINN-off better with omega=1
+        pars['Npinn'] = 100000
         par_vec = ['3G']
     elif par_label == 'lf2':
-        n_opt = '3G'  
-        Npinn = 50000
+        pars['n_opt'] = 'u'  
+        pars['Npinn'] = 50000
         par_vec = [1,10,50,100]
     else:
         stop_execution()
@@ -74,13 +92,15 @@ elif x_opt == 101: #Navier Stokes
 #run
 for j, par in enumerate(par_vec):
     if par_label == 'lf2':
-        lf_fac2 = par
+        pars['lf_fac2'] = par
     elif par_label == 'Ntr':
-        N_train = par
+        pars['N_train'] = par
     elif par_label == 'n':
-        n_opt = par   
+        pars['n_opt'] = par   
+    elif par_label == 'fn':
+        pars['fnoise'] = par
         
-    folder0 = 'x' + str(x_opt) + '_n' + n_opt
+    folder0 = 'x' + str(pars['x_opt']) + '_n' + pars['n_opt']
     if par_label != 'n':
         folder0 += '_' + par_label + str(par)
     input_path = set_input_path(path0, folder0)
